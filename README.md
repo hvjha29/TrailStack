@@ -17,11 +17,14 @@ and `@supabase/supabase-js` 2.52.1; the service worker caches both.
 3. Open **Storage → New bucket**. Create a bucket named exactly
    `trail-audio` and leave **Public bucket** disabled. It must be private.
 4. Open **Authentication → Users → Add user** and create the one email/password
-   user that will use this app. Public sign-ups are not needed and can remain
-   disabled.
-5. Open **Project Settings → API** and copy the project URL and anon/publishable
+   user that will use this app.
+5. Open **Authentication → Providers → Email** and disable new user sign-ups.
+   The existing user continues to work. This is required because the
+   authenticated-user RLS policy intentionally grants every signed-in user full
+   access.
+6. Open **Project Settings → API** and copy the project URL and anon/publishable
    key. Never use the service-role key in the PWA.
-6. Copy `config.example.js` to `config.js`, then replace both placeholders:
+7. Copy `config.example.js` to `config.js`, then replace both placeholders:
 
    ```sh
    cp config.example.js config.js
@@ -34,10 +37,23 @@ and `@supabase/supabase-js` 2.52.1; the service worker caches both.
    });
    ```
 
-`config.js` is gitignored. An anon key is designed to be present in browser
-code, but it is safe here only because RLS is enabled and every policy is
-limited to the `authenticated` role. The service-role key must remain laptop
-only.
+Commit `config.js` so Git-connected static deployments include it. An anon key
+is designed to be present in browser code, but it is safe here only because RLS
+is enabled, every policy is limited to the `authenticated` role, and new
+sign-ups are disabled. The service-role key must remain laptop only.
+
+Before committing, verify anonymous access cannot read entries. Substitute the
+same URL and anon key used in `config.js`:
+
+```sh
+curl -i "$SUPABASE_URL/rest/v1/entries?select=client_id&limit=1" \
+  -H "apikey: $SUPABASE_ANON_KEY" \
+  -H "Authorization: Bearer $SUPABASE_ANON_KEY"
+```
+
+Without signing in, the response must contain `[]` or return `401`; it must
+never contain a trip row. If it exposes a row, stop and fix RLS before
+deployment.
 
 On first online app open, use the sign-in panel. TrailStack calls
 `supabase.auth.signInWithPassword`; Supabase persists and refreshes the session.
@@ -62,7 +78,14 @@ For any deployed shell update, increment `CACHE_NAME` in `sw.js`.
 
 ## 3. Deploy to Vercel
 
-This is a static site. With the Vercel CLI:
+This is a static site. Connect the repository in Vercel, choose **Other** as the
+framework, leave the build command empty, and use the project root (`.`) as the
+output directory. Because the configured `config.js` is committed, every Git
+deployment includes it. After deployment, verify
+`https://your-deployment.vercel.app/config.js` returns JavaScript rather than a
+404 page.
+
+The Vercel CLI remains available for manual deployments:
 
 ```sh
 npm install -g vercel
@@ -70,13 +93,8 @@ vercel
 vercel --prod
 ```
 
-Choose **Other** as the framework, leave the build command empty, and use the
-project root (`.`) as the output directory. Ensure the local `config.js` is
-included in the uploaded deployment, then verify
-`https://your-deployment.vercel.app/config.js` loads. A Git-based deployment
-will omit this gitignored file; either deploy from the configured local folder
-with the CLI or deliberately provide a deployment copy. It is acceptable for
-the anon key to be public; it is not acceptable to expose the service-role key.
+It is acceptable for the anon key to be public; it is not acceptable to expose
+the service-role key.
 
 After deployment, open the site online once and wait for the page to finish
 loading. That first load installs the service worker and caches the complete app

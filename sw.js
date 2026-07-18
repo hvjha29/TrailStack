@@ -1,4 +1,4 @@
-const CACHE_NAME = "trailstack-v1";
+const CACHE_NAME = "trailstack-v2";
 const CDN_ASSETS = [
   "https://cdn.jsdelivr.net/npm/idb@8.0.3/build/umd.js",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.52.1/dist/umd/supabase.js",
@@ -12,7 +12,6 @@ const APP_SHELL = [
   "./sw.js",
   "./manifest.webmanifest",
   "./style.css",
-  "./config.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   ...CDN_ASSETS,
@@ -22,7 +21,13 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+      .then(async (cache) => {
+        await cache.addAll(APP_SHELL);
+        await cache.add("./config.js").catch(() => {
+          // Configuration is optional for local-only use and must never prevent
+          // the offline app shell from installing.
+        });
+      })
       .then(() => self.skipWaiting()),
   );
 });
