@@ -596,9 +596,6 @@ function renderEntries(records) {
       const audioSynced = audio.sync_state === "synced";
       badges.append(
         makeBadge(
-          audioSynced ? "🎙✓" : "�Synced = audio.sync_state === "synced";
-      badges.append(
-        makeBadge(
           audioSynced ? "🎙✓" : "🎙⏳",
           audioSynced ? "Audio synced" : "Audio pending sync",
           audioSynced ? "success" : "pending",
