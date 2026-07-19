@@ -1,4 +1,4 @@
-const CACHE_NAME = "trailstack-v2";
+const CACHE_NAME = "trailstack-v3";
 const CDN_ASSETS = [
   "https://cdn.jsdelivr.net/npm/idb@8.0.3/build/umd.js",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.52.1/dist/umd/supabase.js",

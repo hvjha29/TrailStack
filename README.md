@@ -175,4 +175,6 @@ failure, change that row's `transcript_status` back to `pending` and rerun.
 - Supabase API, authentication, and Storage requests are network-only in the
   service worker and are never cached.
 - Recordings warn at 4:30 and stop automatically at 5:00. Safari prefers
-  `audio/mp4`; Chrome/Android prefer Opus in WebM.
+  `audio/mp4`; Chrome/Android prefer Opus in WebM. Audio is stored in IndexedDB
+  as an `ArrayBuffer` (not a `Blob`) because iOS Safari rejects MediaRecorder
+  blobs with "Error preparing Blob/File data to be stored in object store".

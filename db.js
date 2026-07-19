@@ -43,9 +43,19 @@ export async function putEntry(entry) {
 }
 
 export async function putAudio(audio) {
+  // iOS Safari throws "Error preparing Blob/File data to be stored in object
+  // store" for MediaRecorder Blobs. Persist an ArrayBuffer instead.
+  const buffer = await toArrayBuffer(audio.blob ?? audio.buffer);
   const db = await database();
-  await db.put("audio", audio);
-  return audio;
+  const record = {
+    client_id: audio.client_id,
+    buffer,
+    mime: audio.mime || "application/octet-stream",
+    duration_s: audio.duration_s ?? null,
+    sync_state: audio.sync_state || "pending",
+  };
+  await db.put("audio", record);
+  return hydrateAudio(record);
 }
 
 export async function getEntry(clientId) {
@@ -55,13 +65,14 @@ export async function getEntry(clientId) {
 
 export async function getAudio(clientId) {
   const db = await database();
-  return db.get("audio", clientId);
+  return hydrateAudio(await db.get("audio", clientId));
 }
 
 export async function getPending(store) {
   assertStore(store);
   const db = await database();
-  return db.getAllFromIndex(store, "sync_state", "pending");
+  const records = await db.getAllFromIndex(store, "sync_state", "pending");
+  return store === "audio" ? records.map(hydrateAudio) : records;
 }
 
 export async function markSynced(store, clientId) {
@@ -126,4 +137,32 @@ function localDay(timestamp) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+async function toArrayBuffer(source) {
+  if (!source) throw new Error("Recording data was empty.");
+  if (source instanceof ArrayBuffer) return source;
+  if (ArrayBuffer.isView(source)) {
+    return source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
+  }
+  if (typeof source.arrayBuffer === "function") {
+    return source.arrayBuffer();
+  }
+  throw new Error("Unsupported recording data type.");
+}
+
+function hydrateAudio(record) {
+  if (!record) return null;
+  const mime = record.mime || "application/octet-stream";
+  const blob =
+    record.blob instanceof Blob
+      ? record.blob
+      : new Blob([record.buffer], { type: mime });
+  return {
+    client_id: record.client_id,
+    blob,
+    mime,
+    duration_s: record.duration_s ?? null,
+    sync_state: record.sync_state || "pending",
+  };
 }
