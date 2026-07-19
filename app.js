@@ -694,8 +694,12 @@ async function refreshPendingCount() {
 
 async function syncAndRefresh(reason) {
   try {
-    await syncAll({ reason });
+    const summary = await syncAll({ reason });
     await Promise.all([refreshEntries(), refreshPendingCount()]);
+
+    if (summary?.skipped && !navigator.onLine) {
+      showToast("Still offline — sync will retry when you reconnect.", "info");
+    }
   } catch (error) {
     showToast(`Sync failed: ${errorMessage(error)}`, "error");
   } finally {

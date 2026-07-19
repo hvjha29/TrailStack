@@ -5,6 +5,26 @@ import {
   patchEntry,
 } from "./db.js";
 
+const ENTRY_COLUMNS = [
+  "client_id",
+  "ts",
+  "lat",
+  "lon",
+  "gps_accuracy_m",
+  "type",
+  "title",
+  "body",
+  "rating",
+  "cost_amt",
+  "currency",
+  "tags",
+  "audio_path",
+  "transcript",
+  "transcript_status",
+  "created_offline",
+  "synced_at",
+];
+
 let client;
 let activeSync;
 
@@ -119,16 +139,7 @@ async function runSync(reason) {
 
   for (const entry of entries) {
     try {
-      const syncedAt = new Date().toISOString();
-      const { sync_state: _localState, ...remoteEntry } = entry;
-      const { error } = await supabaseClient
-        .from("entries")
-        .upsert(
-          { ...remoteEntry, synced_at: syncedAt },
-          { onConflict: "client_id" },
-        );
-
-      if (error) throw error;
+      await upsertEntry(supabaseClient, entry);
       await markSynced("entries", entry.client_id);
       summary.entries += 1;
     } catch (error) {
@@ -151,34 +162,8 @@ async function runSync(reason) {
 
   for (const audio of audioRecords) {
     try {
-      const localEntry = await getEntry(audio.client_id);
-      if (!localEntry || localEntry.sync_state !== "synced") continue;
-
-      const extension = extensionForMime(audio.mime);
-      const path = `${audio.client_id}.${extension}`;
-      const { error: uploadError } = await supabaseClient.storage
-        .from("trail-audio")
-        .upload(path, audio.blob, {
-          contentType: audio.mime,
-          upsert: true,
-        });
-      if (uploadError) throw uploadError;
-
-      const { error: updateError } = await supabaseClient
-        .from("entries")
-        .update({
-          audio_path: path,
-          transcript_status: "pending",
-          synced_at: new Date().toISOString(),
-        })
-        .eq("client_id", audio.client_id);
-      if (updateError) throw updateError;
-
-      await patchEntry(audio.client_id, {
-        audio_path: path,
-        transcript_status: "pending",
-      });
-      await markSynced("audio", audio.client_id);
+      await ensureEntrySynced(supabaseClient, audio.client_id, summary);
+      await uploadAudio(supabaseClient, audio);
       summary.audio += 1;
     } catch (error) {
       summary.failed += 1;
@@ -190,15 +175,107 @@ async function runSync(reason) {
     }
   }
 
-  emit(
-    "sync-complete",
-    summary.failed
-      ? `Sync finished with ${summary.failed} issue${summary.failed === 1 ? "" : "s"}.`
-      : `Sync complete: ${summary.entries} entr${summary.entries === 1 ? "y" : "ies"}, ${summary.audio} audio.`,
-    summary.failed ? "error" : "success",
-  );
+  let stillPending = 0;
+  try {
+    const [pendingEntries, pendingAudio] = await Promise.all([
+      getPending("entries"),
+      getPending("audio"),
+    ]);
+    stillPending = pendingEntries.length + pendingAudio.length;
+  } catch {
+    // Ignore; summary toast below still reports what we know.
+  }
+
+  if (summary.failed) {
+    emit(
+      "sync-complete",
+      `Sync finished with ${summary.failed} issue${summary.failed === 1 ? "" : "s"}. ${stillPending} still pending.`,
+      "error",
+    );
+  } else if (stillPending > 0) {
+    emit(
+      "sync-complete",
+      `Synced ${summary.entries} entr${summary.entries === 1 ? "y" : "ies"}, ${summary.audio} audio. ${stillPending} still pending — tap Sync now.`,
+      "info",
+    );
+  } else {
+    emit(
+      "sync-complete",
+      `Sync complete: ${summary.entries} entr${summary.entries === 1 ? "y" : "ies"}, ${summary.audio} audio.`,
+      "success",
+    );
+  }
 
   return summary;
+}
+
+async function ensureEntrySynced(supabaseClient, clientId, summary) {
+  const localEntry = await getEntry(clientId);
+  if (!localEntry) {
+    throw new Error("Recording has no matching local entry. Save the entry after recording.");
+  }
+
+  if (localEntry.sync_state === "synced") return localEntry;
+
+  await upsertEntry(supabaseClient, localEntry);
+  await markSynced("entries", clientId);
+  summary.entries += 1;
+  return getEntry(clientId);
+}
+
+async function upsertEntry(supabaseClient, entry) {
+  const syncedAt = new Date().toISOString();
+  const remoteEntry = toRemoteEntry(entry, syncedAt);
+  const { error } = await supabaseClient
+    .from("entries")
+    .upsert(remoteEntry, { onConflict: "client_id" });
+  if (error) throw error;
+}
+
+async function uploadAudio(supabaseClient, audio) {
+  if (!audio?.blob?.size) {
+    throw new Error("Local recording blob is empty.");
+  }
+
+  const extension = extensionForMime(audio.mime);
+  const path = `${audio.client_id}.${extension}`;
+  const { error: uploadError } = await supabaseClient.storage
+    .from("trail-audio")
+    .upload(path, audio.blob, {
+      contentType: audio.mime || "application/octet-stream",
+      upsert: true,
+    });
+  if (uploadError) throw uploadError;
+
+  const { error: updateError } = await supabaseClient
+    .from("entries")
+    .update({
+      audio_path: path,
+      transcript_status: "pending",
+      synced_at: new Date().toISOString(),
+    })
+    .eq("client_id", audio.client_id);
+  if (updateError) throw updateError;
+
+  await patchEntry(audio.client_id, {
+    audio_path: path,
+    transcript_status: "pending",
+  });
+  await markSynced("audio", audio.client_id);
+}
+
+function toRemoteEntry(entry, syncedAt) {
+  const remote = {};
+  for (const key of ENTRY_COLUMNS) {
+    if (key === "synced_at") {
+      remote.synced_at = syncedAt;
+      continue;
+    }
+    if (entry[key] !== undefined) remote[key] = entry[key];
+  }
+  if (!remote.transcript_status) remote.transcript_status = "none";
+  if (!Array.isArray(remote.tags)) remote.tags = [];
+  return remote;
 }
 
 function extensionForMime(mime = "") {

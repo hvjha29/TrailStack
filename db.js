@@ -77,7 +77,17 @@ export async function getPending(store) {
   assertStore(store);
   const db = await database();
   const records = await db.getAllFromIndex(store, "sync_state", "pending");
-  return store === "audio" ? records.map(hydrateAudio) : records;
+  if (store !== "audio") return records;
+
+  const hydrated = [];
+  for (const record of records) {
+    try {
+      hydrated.push(hydrateAudio(record));
+    } catch (error) {
+      console.warn("Skipping unreadable pending audio", record?.client_id, error);
+    }
+  }
+  return hydrated;
 }
 
 export async function markSynced(store, clientId) {
