@@ -166,14 +166,23 @@ function bindEvents() {
 
   window.addEventListener("trailstack:sync", (event) => {
     const { type, message, level } = event.detail;
-    const syncing = type === "sync-start";
-    elements.syncButton.disabled = syncing;
-    elements.syncButton.textContent = syncing ? "Syncing…" : "Sync now";
+    if (type === "sync-start") {
+      setSyncButtonState(true);
+    } else if (type === "sync-idle" || type === "sync-complete" || type === "sync-error") {
+      setSyncButtonState(false);
+    }
 
     if (level !== "status") {
       showToast(message, level);
     }
   });
+
+  // Recover if a previous hang left the button disabled.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") setSyncButtonState(false);
+  });
+  window.addEventListener("pageshow", () => setSyncButtonState(false));
+  setSyncButtonState(false);
 
   window.addEventListener("beforeunload", () => {
     removeAuthListener();
@@ -703,15 +712,22 @@ async function refreshPendingCount() {
 }
 
 async function syncAndRefresh(reason) {
+  setSyncButtonState(true);
   try {
     await syncAll({ reason });
     await Promise.all([refreshEntries(), refreshPendingCount()]);
   } catch (error) {
     showToast(`Sync failed: ${errorMessage(error)}`, "error");
   } finally {
-    elements.syncButton.disabled = false;
-    elements.syncButton.textContent = "Sync now";
+    setSyncButtonState(false);
   }
+}
+
+function setSyncButtonState(syncing) {
+  if (!elements.syncButton) return;
+  elements.syncButton.disabled = Boolean(syncing);
+  elements.syncButton.setAttribute("aria-busy", String(Boolean(syncing)));
+  elements.syncButton.textContent = syncing ? "Syncing…" : "Sync now";
 }
 
 function updateNetworkStatus() {

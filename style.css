@@ -193,6 +193,20 @@ main {
   margin-bottom: 14px;
 }
 
+.today-heading {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.sync-button {
+  flex-shrink: 0;
+  min-height: 56px;
+  position: relative;
+  touch-action: manipulation;
+  width: 100%;
+  z-index: 2;
+}
+
 .eyebrow {
   color: var(--accent);
   font-size: 0.7rem;
@@ -440,6 +454,17 @@ select {
 .section-heading .secondary-button {
   min-height: 56px;
   padding: 8px 14px;
+}
+
+@media (min-width: 600px) {
+  .today-heading {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .sync-button {
+    width: auto;
+  }
 }
 
 .text-button {

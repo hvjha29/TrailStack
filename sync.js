@@ -7,6 +7,7 @@ import {
 
 let client;
 let activeSync;
+let syncGeneration = 0;
 
 function config() {
   return globalThis.TRAILSTACK_CONFIG ?? {};
@@ -74,15 +75,34 @@ export function onAuthStateChange(callback) {
   return () => data.subscription.unsubscribe();
 }
 
+const SYNC_TIMEOUT_MS = 45000;
+
 export function syncAll({ reason = "automatic" } = {}) {
   if (activeSync) return activeSync;
-  activeSync = runSync(reason).finally(() => {
-    activeSync = null;
-  });
+
+  const generation = ++syncGeneration;
+
+  activeSync = Promise.race([
+    runSync(reason, generation),
+    timeoutRejection(SYNC_TIMEOUT_MS, "Sync timed out. Tap Sync now to retry."),
+  ])
+    .catch((error) => {
+      if (generation === syncGeneration) {
+        emit("sync-error", readableError(error), "error");
+      }
+      return { entries: 0, audio: 0, failed: 1, skipped: false };
+    })
+    .finally(() => {
+      if (generation === syncGeneration) {
+        activeSync = null;
+        emit("sync-idle", "Sync idle.", "status");
+      }
+    });
+
   return activeSync;
 }
 
-async function runSync(reason) {
+async function runSync(reason, generation) {
   const summary = {
     entries: 0,
     audio: 0,
@@ -92,30 +112,38 @@ async function runSync(reason) {
     pendingAudio: 0,
   };
 
+  const emitIfCurrent = (type, message, level) => {
+    if (generation === syncGeneration) emit(type, message, level);
+  };
+
+  emitIfCurrent("sync-start", `Sync started (${reason}).`, "status");
+
   if (!navigator.onLine) {
-    emit("sync-complete", "You are offline. Sync will retry when online.", "info");
+    emitIfCurrent("sync-complete", "You are offline. Sync will retry when online.", "info");
     return { ...summary, skipped: true };
   }
 
   if (!hasSupabaseConfig()) {
-    emit("configuration", "Supabase is not configured; saves remain local.", "info");
+    emitIfCurrent("configuration", "Supabase is not configured; saves remain local.", "info");
     return { ...summary, skipped: true };
   }
 
   let supabaseClient;
   try {
     supabaseClient = getSupabase();
-    const session = await ensureFreshSession();
+    const session = await withTimeout(
+      ensureFreshSession(),
+      15000,
+      "Auth check timed out. Tap Sync now to retry.",
+    );
     if (!session) {
-      emit("auth-required", "Sign in once to sync saved entries.", "info");
+      emitIfCurrent("auth-required", "Sign in once to sync saved entries.", "info");
       return { ...summary, skipped: true };
     }
   } catch (error) {
-    emit("sync-error", readableError(error), "error");
+    emitIfCurrent("sync-error", readableError(error), "error");
     return { ...summary, failed: 1 };
   }
-
-  emit("sync-start", `Sync started (${reason}).`, "status");
 
   let entries = [];
   try {
@@ -218,24 +246,33 @@ async function runSync(reason) {
       ? `Nothing pending to sync (${summary.pendingEntries} entr${summary.pendingEntries === 1 ? "y" : "ies"}, ${summary.pendingAudio} audio looked up).`
       : `Sync complete: ${summary.entries} entr${summary.entries === 1 ? "y" : "ies"}, ${summary.audio} audio.`;
 
-  emit("sync-complete", message, summary.failed ? "error" : "success");
+  emitIfCurrent("sync-complete", message, summary.failed ? "error" : "success");
   return summary;
 }
 
 async function ensureFreshSession() {
   const supabaseClient = getSupabase();
-  const { data: userData, error: userError } = await supabaseClient.auth.getUser();
-  if (userError) {
-    // Cached session may be stale; try an explicit refresh once.
-    const { data: refreshed, error: refreshError } =
-      await supabaseClient.auth.refreshSession();
-    if (refreshError) throw userError;
-    return refreshed.session;
-  }
-  if (!userData.user) return null;
-  const { data, error } = await supabaseClient.auth.getSession();
-  if (error) throw error;
-  return data.session;
+  // Prefer local session first — getUser() hits the network and can hang on
+  // flaky hotel Wi‑Fi, which previously left Sync now stuck/disabled.
+  const { data: sessionData, error: sessionError } =
+    await supabaseClient.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (sessionData.session) return sessionData.session;
+
+  const { data: refreshed, error: refreshError } =
+    await supabaseClient.auth.refreshSession();
+  if (refreshError) throw refreshError;
+  return refreshed.session;
+}
+
+function withTimeout(promise, ms, message) {
+  return Promise.race([promise, timeoutRejection(ms, message)]);
+}
+
+function timeoutRejection(ms, message) {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
+  });
 }
 
 async function upsertEntry(supabaseClient, entry) {
