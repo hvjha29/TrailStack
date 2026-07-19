@@ -43,13 +43,18 @@ export async function putEntry(entry) {
 }
 
 export async function putAudio(audio) {
-  // iOS Safari throws "Error preparing Blob/File data to be stored in object
-  // store" for MediaRecorder Blobs. Persist an ArrayBuffer instead.
-  const buffer = await toArrayBuffer(audio.blob ?? audio.buffer);
+  // iOS Safari often rejects MediaRecorder Blobs (and sometimes the ArrayBuffers
+  // derived from them) in IndexedDB with:
+  // "Error preparing Blob/File data to be stored in object store".
+  // Store a plain base64 string — structured-clone safe on WebKit.
+  const buffer = await toArrayBuffer(audio.blob ?? audio.buffer ?? audio.bytes);
+  const bytes = new Uint8Array(buffer.byteLength);
+  bytes.set(new Uint8Array(buffer));
+
   const db = await database();
   const record = {
     client_id: audio.client_id,
-    buffer,
+    data_b64: u8ToBase64(bytes),
     mime: audio.mime || "application/octet-stream",
     duration_s: audio.duration_s ?? null,
     sync_state: audio.sync_state || "pending",
@@ -141,26 +146,77 @@ function localDay(timestamp) {
 
 async function toArrayBuffer(source) {
   if (!source) throw new Error("Recording data was empty.");
-  if (source instanceof ArrayBuffer) return source;
+  if (source instanceof ArrayBuffer) return source.slice(0);
   if (ArrayBuffer.isView(source)) {
     return source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
   }
+  if (typeof Response !== "undefined" && typeof source.stream === "function") {
+    try {
+      return await new Response(source).arrayBuffer();
+    } catch {
+      // Fall through to Blob.arrayBuffer / FileReader.
+    }
+  }
   if (typeof source.arrayBuffer === "function") {
-    return source.arrayBuffer();
+    return (await source.arrayBuffer()).slice(0);
+  }
+  if (typeof FileReader !== "undefined" && typeof Blob !== "undefined" && source instanceof Blob) {
+    return readBlobAsArrayBuffer(source);
   }
   throw new Error("Unsupported recording data type.");
+}
+
+function readBlobAsArrayBuffer(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Could not read recording."));
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+function u8ToBase64(bytes) {
+  const chunk = 0x2000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+function base64ToU8(dataB64) {
+  const binary = atob(dataB64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 function hydrateAudio(record) {
   if (!record) return null;
   const mime = record.mime || "application/octet-stream";
-  const blob =
-    record.blob instanceof Blob
-      ? record.blob
-      : new Blob([record.buffer], { type: mime });
+  let bytes;
+  if (typeof record.data_b64 === "string") {
+    bytes = base64ToU8(record.data_b64);
+  } else if (record.bytes instanceof Uint8Array) {
+    bytes = record.bytes;
+  } else if (record.buffer instanceof ArrayBuffer) {
+    bytes = new Uint8Array(record.buffer);
+  } else if (record.blob instanceof Blob) {
+    // Legacy in-memory shape only; not re-persisted as a Blob.
+    return {
+      client_id: record.client_id,
+      blob: record.blob,
+      mime,
+      duration_s: record.duration_s ?? null,
+      sync_state: record.sync_state || "pending",
+    };
+  } else {
+    throw new Error("Stored recording is missing audio bytes.");
+  }
+
   return {
     client_id: record.client_id,
-    blob,
+    blob: new Blob([bytes], { type: mime }),
     mime,
     duration_s: record.duration_s ?? null,
     sync_state: record.sync_state || "pending",

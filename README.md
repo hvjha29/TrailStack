@@ -176,5 +176,7 @@ failure, change that row's `transcript_status` back to `pending` and rerun.
   service worker and are never cached.
 - Recordings warn at 4:30 and stop automatically at 5:00. Safari prefers
   `audio/mp4`; Chrome/Android prefer Opus in WebM. Audio is stored in IndexedDB
-  as an `ArrayBuffer` (not a `Blob`) because iOS Safari rejects MediaRecorder
+  as base64 (not a `Blob`/`ArrayBuffer`) because iOS Safari rejects MediaRecorder
   blobs with "Error preparing Blob/File data to be stored in object store".
+  After a deploy, bump `CACHE_NAME` and on iPhone clear that site’s data once so
+  the new service worker replaces a stale shell.

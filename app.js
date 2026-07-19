@@ -478,15 +478,19 @@ async function finishRecording() {
     const blob = new Blob(recordedChunks, { type: mime });
     if (!blob.size) throw new Error("The recording was empty.");
 
+    // Copy out of MediaRecorder-owned memory before IndexedDB (critical on iOS).
+    const buffer = await new Response(blob).arrayBuffer();
+    const detached = new Blob([buffer.slice(0)], { type: mime });
+
     pendingAudio = {
       client_id: clientId,
-      blob,
+      blob: detached,
       mime,
       duration_s: Number(durationSeconds.toFixed(1)),
       sync_state: "pending",
     };
     await putAudio(pendingAudio);
-    renderAudioPreview(blob);
+    renderAudioPreview(detached);
     showToast("Recording attached to this entry.", "success");
   } catch (error) {
     pendingAudio = null;

@@ -1,4 +1,4 @@
-const CACHE_NAME = "trailstack-v3";
+const CACHE_NAME = "trailstack-v4";
 const CDN_ASSETS = [
   "https://cdn.jsdelivr.net/npm/idb@8.0.3/build/umd.js",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.52.1/dist/umd/supabase.js",
@@ -58,6 +58,12 @@ self.addEventListener("fetch", (event) => {
 
   if (request.method !== "GET") return;
 
+  // App JS must refresh when online so iOS does not keep a broken audio store.
+  if (url.pathname.endsWith(".js")) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then(async (cached) => {
       if (cached) return cached;
@@ -74,6 +80,21 @@ self.addEventListener("fetch", (event) => {
     }),
   );
 });
+
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (error) {
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    throw error;
+  }
+}
 
 function isSupabaseRequest(url) {
   const supabaseHost =
