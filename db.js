@@ -76,7 +76,10 @@ export async function getAudio(clientId) {
 export async function getPending(store) {
   assertStore(store);
   const db = await database();
-  const records = await db.getAllFromIndex(store, "sync_state", "pending");
+  // Filter manually — more reliable than getAllFromIndex across browsers.
+  const records = (await db.getAll(store)).filter(
+    (record) => record?.sync_state === "pending",
+  );
   if (store !== "audio") return records;
 
   const hydrated = [];
@@ -84,7 +87,7 @@ export async function getPending(store) {
     try {
       hydrated.push(hydrateAudio(record));
     } catch (error) {
-      console.warn("Skipping unreadable pending audio", record?.client_id, error);
+      console.error("Skipping unreadable pending audio", record?.client_id, error);
     }
   }
   return hydrated;
@@ -212,7 +215,7 @@ function hydrateAudio(record) {
   } else if (record.buffer instanceof ArrayBuffer) {
     bytes = new Uint8Array(record.buffer);
   } else if (record.blob instanceof Blob) {
-    // Legacy in-memory shape only; not re-persisted as a Blob.
+    // Legacy shape from older Android builds that stored Blobs directly.
     return {
       client_id: record.client_id,
       blob: record.blob,

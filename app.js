@@ -140,6 +140,7 @@ function bindEvents() {
       showToast("You are offline. Sync will retry automatically.", "info");
       return;
     }
+    showToast("Syncing now…", "info");
     void syncAndRefresh("manual");
   });
 
@@ -591,14 +592,26 @@ function renderEntries(records) {
 
     const badges = document.createElement("span");
     badges.className = "entry-badges";
-    if (audio) badges.append(makeBadge("🎙", "Audio attached"));
+    if (audio) {
+      const audioSynced = audio.sync_state === "synced";
+      badges.append(
+        makeBadge(
+          audioSynced ? "🎙✓" : "�Synced = audio.sync_state === "synced";
+      badges.append(
+        makeBadge(
+          audioSynced ? "🎙✓" : "🎙⏳",
+          audioSynced ? "Audio synced" : "Audio pending sync",
+          audioSynced ? "success" : "pending",
+        ),
+      );
+    }
     if (entry.lat == null || entry.lon == null) {
       badges.append(makeBadge("no GPS", "No GPS fix", "warning"));
     }
     badges.append(
       makeBadge(
         entry.sync_state === "synced" ? "✓" : "⏳",
-        entry.sync_state === "synced" ? "Synced" : "Pending sync",
+        entry.sync_state === "synced" ? "Entry synced" : "Entry pending sync",
         entry.sync_state === "synced" ? "success" : "pending",
       ),
     );
@@ -694,12 +707,8 @@ async function refreshPendingCount() {
 
 async function syncAndRefresh(reason) {
   try {
-    const summary = await syncAll({ reason });
+    await syncAll({ reason });
     await Promise.all([refreshEntries(), refreshPendingCount()]);
-
-    if (summary?.skipped && !navigator.onLine) {
-      showToast("Still offline — sync will retry when you reconnect.", "info");
-    }
   } catch (error) {
     showToast(`Sync failed: ${errorMessage(error)}`, "error");
   } finally {
