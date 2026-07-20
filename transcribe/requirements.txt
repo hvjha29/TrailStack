@@ -1,3 +1,10 @@
 faster-whisper
 python-dotenv
 supabase
+numpy
+sounddevice
+# Pin PyObjC: newer yanked builds fail to compile on macOS Python 3.9.
+pyobjc-core==10.3.2
+pyobjc-framework-Cocoa==10.3.2
+pyobjc-framework-Quartz==10.3.2
+pynput==1.7.7

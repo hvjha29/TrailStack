@@ -164,6 +164,24 @@ The first run downloads the large model and can take time. Successful rows are
 marked `done`; errors are printed and marked `failed`. To retry a corrected
 failure, change that row's `transcript_status` back to `pending` and rerun.
 
+### Local voice typing (Mac)
+
+Hold **F5** to dictate into the focused app (same transcribe venv):
+
+```sh
+cd transcribe
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python dictate.py
+```
+
+Grant **Microphone** and **Accessibility** to your terminal app. Default model is
+`small` for snappy dictation; for maximum accuracy:
+
+```sh
+DICTATE_MODEL=large-v3 python dictate.py
+```
+
 ## Behavior notes
 
 - IndexedDB is the trip's local source of truth; successful sync never deletes

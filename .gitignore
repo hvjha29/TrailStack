@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 .vercel/
 .venv/
+travel_bookings/
